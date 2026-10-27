@@ -115,9 +115,9 @@
     const form = document.getElementById("taskForm");
     const input = document.getElementById("taskInput");
     const list = document.getElementById("taskList");
-    let tasks = [];
-
+let tasks = JSON.parse(localStorage.getItem("tasktrack_tasks")) || [];
     function renderTasks() {
+        localStorage.setItem("tasktrack_tasks", JSON.stringify(tasks));
       list.replaceChildren();
 
       if (tasks.length === 0) {
