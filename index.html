@@ -1,0 +1,186 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaskTrack | Smart Task Manager</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f7fb;
+      color: #172033;
+    }
+    header {
+      background: #172554;
+      color: white;
+      padding: 22px 8%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 { margin: 0; font-size: 25px; }
+    header span { color: #93c5fd; }
+    main { max-width: 1000px; margin: 35px auto; padding: 0 20px; }
+    .welcome { margin-bottom: 25px; }
+    .welcome h2 { margin-bottom: 8px; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+    .card, .task-panel {
+      background: white;
+      border-radius: 12px;
+      padding: 22px;
+      box-shadow: 0 3px 15px #17255410;
+    }
+    .card p { color: #64748b; margin: 0 0 10px; }
+    .card h3 { margin: 0; font-size: 28px; }
+    .task-panel h2 { margin-top: 0; }
+    form { display: flex; gap: 10px; margin-bottom: 20px; }
+    input {
+      flex: 1;
+      min-width: 0;
+      padding: 13px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 15px;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 12px 18px;
+      background: #2563eb;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+    .task {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .task:last-child { border-bottom: 0; }
+    .task label { display: flex; align-items: center; gap: 10px; }
+    .task input { flex: none; width: auto; }
+    .completed { text-decoration: line-through; color: #94a3b8; }
+    .delete { background: #fee2e2; color: #b91c1c; padding: 8px 11px; }
+    .delete:hover { background: #fecaca; }
+    .empty { color: #64748b; text-align: center; padding: 20px; }
+    @media (max-width: 600px) {
+      header { padding: 20px; }
+      .stats { grid-template-columns: 1fr; }
+      form { flex-wrap: wrap; }
+      form input { flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Task<span>Track</span></h1>
+    <span>My Workspace</span>
+  </header>
+
+  <main>
+    <section class="welcome">
+      <h2>My Tasks</h2>
+      <p>Plan your work. Track your progress. Get things done.</p>
+    </section>
+
+    <section class="stats">
+      <div class="card"><p>Total Tasks</p><h3 id="total">0</h3></div>
+      <div class="card"><p>Completed</p><h3 id="done">0</h3></div>
+      <div class="card"><p>Pending</p><h3 id="pending">0</h3></div>
+    </section>
+
+    <section class="task-panel">
+      <h2>Add a Task</h2>
+      <form id="taskForm">
+        <input id="taskInput" placeholder="What do you need to do?" required>
+        <button type="submit">+ Add Task</button>
+      </form>
+      <div id="taskList"><p class="empty">No tasks yet. Add your first task!</p></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("taskForm");
+    const input = document.getElementById("taskInput");
+    const list = document.getElementById("taskList");
+    let tasks = [];
+
+    function renderTasks() {
+      list.replaceChildren();
+
+      if (tasks.length === 0) {
+        const message = document.createElement("p");
+        message.className = "empty";
+        message.textContent = "No tasks yet. Add your first task!";
+        list.appendChild(message);
+      }
+
+      tasks.forEach(task => {
+        const row = document.createElement("div");
+        row.className = "task";
+
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = task.completed;
+        checkbox.addEventListener("change", () => {
+          task.completed = checkbox.checked;
+          renderTasks();
+        });
+
+        const name = document.createElement("span");
+        name.textContent = task.name;
+        if (task.completed) name.className = "completed";
+
+        label.append(checkbox, name);
+
+        const remove = document.createElement("button");
+        remove.className = "delete";
+        remove.textContent = "Delete";
+        remove.addEventListener("click", () => {
+          tasks = tasks.filter(item => item.id !== task.id);
+          renderTasks();
+        });
+
+        row.append(label, remove);
+        list.appendChild(row);
+      });
+
+      document.getElementById("total").textContent = tasks.length;
+      document.getElementById("done").textContent =
+        tasks.filter(task => task.completed).length;
+      document.getElementById("pending").textContent =
+        tasks.filter(task => !task.completed).length;
+    }
+
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const name = input.value.trim();
+      if (!name) return;
+
+      tasks.push({
+        id: Date.now(),
+        name,
+        completed: false
+      });
+
+      input.value = "";
+      renderTasks();
+    });
+
+    renderTasks();
+  </script>
+</body>
+</html>
