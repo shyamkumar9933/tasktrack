@@ -1,14 +1,13 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TaskTrack | Task Management</title>
+<title>TaskTrack | Smart Task Management</title>
 <style>
 :root {
   --bg: #f4f7fb;
-  --card: #ffffff;
+  --card: #fff;
   --text: #172033;
   --muted: #64748b;
   --primary: #315bea;
@@ -80,6 +79,7 @@ button {
   cursor: pointer;
 }
 button:hover { filter: brightness(.94); }
+button:disabled { opacity: .6; cursor: not-allowed; }
 .filters {
   display: flex;
   gap: 8px;
@@ -128,18 +128,23 @@ button:hover { filter: brightness(.94); }
   color: #94a3b8;
 }
 .completed .pill { opacity: .7; }
-.delete {
-  background: #fee2e2;
-  color: #b91c1c;
-  padding: 8px 11px;
-  flex-shrink: 0;
-}
+.delete { background: #fee2e2; color: #b91c1c; padding: 8px 11px; flex-shrink: 0; }
 .empty { text-align: center; color: var(--muted); padding: 35px 10px; }
+.notice {
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-bottom: 18px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.notice.error { background: #fee2e2; color: #991b1b; }
+.notice.success { background: #dcfce7; color: #166534; }
+.notice.info { background: #e0e7ff; color: #3730a3; }
+.hidden { display: none; }
 .footer { text-align: center; color: var(--muted); font-size: 12px; padding: 10px 0 25px; }
 @media(max-width: 760px) {
   form { grid-template-columns: 1fr 1fr; }
-  form input:first-child { grid-column: 1 / -1; }
-  form button { grid-column: 1 / -1; }
+  form input:first-child, form button { grid-column: 1 / -1; }
 }
 @media(max-width: 520px) {
   header { padding: 18px; }
@@ -169,6 +174,8 @@ button:hover { filter: brightness(.94); }
     <p>Plan your work. Prioritize what matters. Get things done.</p>
   </section>
 
+  <div id="notice" class="notice hidden" role="status"></div>
+
   <section class="stats">
     <div class="card"><p>Total Tasks</p><h2 id="total">0</h2></div>
     <div class="card"><p>Completed</p><h2 id="done">0</h2></div>
@@ -185,7 +192,7 @@ button:hover { filter: brightness(.94); }
         <option value="Low">Low Priority</option>
       </select>
       <input id="taskDue" type="date" aria-label="Due date">
-      <button type="submit">+ Add Task</button>
+      <button id="addButton" type="submit">+ Add Task</button>
     </form>
 
     <div class="filters">
@@ -201,40 +208,96 @@ button:hover { filter: brightness(.94); }
 </main>
 
 <script>
-const STORAGE_KEY = "tasktrack_tasks";
+const API_URL = "http://localhost:8080/api/tasks";
+
 const form = document.getElementById("taskForm");
 const input = document.getElementById("taskInput");
 const priorityInput = document.getElementById("taskPriority");
 const dueInput = document.getElementById("taskDue");
 const searchInput = document.getElementById("searchInput");
 const list = document.getElementById("taskList");
+const notice = document.getElementById("notice");
+const addButton = document.getElementById("addButton");
 
 let tasks = [];
 let currentFilter = "All";
+let busy = false;
 
-try {
-  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-  if (Array.isArray(saved)) {
-    tasks = saved.filter(t =>
-      t && typeof t.name === "string" && t.name.trim()
-    ).map(t => ({
-      id: t.id || Date.now() + Math.random(),
-      name: t.name,
-      priority: ["High", "Medium", "Low"].includes(t.priority)
-        ? t.priority : "Medium",
-      dueDate: t.dueDate || "",
-      completed: Boolean(t.completed)
-    }));
-  }
-} catch (error) {
-  tasks = [];
+function showNotice(message, type = "info") {
+  notice.textContent = message;
+  notice.className = "notice " + type;
 }
 
-function saveTasks() {
+function hideNotice() {
+  notice.textContent = "";
+  notice.className = "notice hidden";
+}
+
+async function apiRequest(path = "", options = {}) {
+  let response;
+
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    response = await fetch(API_URL + path, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
   } catch (error) {
-    alert("Unable to save tasks in this browser.");
+    throw new Error(
+      "Cannot connect to the backend. Start Spring Boot and try again."
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error("Backend error: HTTP " + response.status);
+  }
+
+  if (response.status === 204) return null;
+
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// Convert backend Task objects (title) into the frontend format (name).
+function fromApi(task) {
+  return {
+    id: task.id,
+    name: task.title ?? task.name ?? "",
+    priority: ["High", "Medium", "Low"].includes(task.priority)
+      ? task.priority : "Medium",
+    dueDate: task.dueDate || "",
+    completed: Boolean(task.completed)
+  };
+}
+
+function toApi(task) {
+  return {
+    title: task.name,
+    priority: task.priority,
+    dueDate: task.dueDate || "",
+    completed: task.completed
+  };
+}
+
+async function loadTasks() {
+  list.innerHTML = '<div class="empty">Loading tasks...</div>';
+
+  try {
+    const result = await apiRequest();
+
+    if (!Array.isArray(result)) {
+      throw new Error("Unexpected response from the backend.");
+    }
+
+    tasks = result.map(fromApi);
+    hideNotice();
+    renderTasks();
+  } catch (error) {
+    tasks = [];
+    renderTasks();
+    showNotice(error.message, "error");
   }
 }
 
@@ -250,16 +313,18 @@ function renderTasks() {
 
   document.getElementById("total").textContent = tasks.length;
   document.getElementById("done").textContent =
-    tasks.filter(t => t.completed).length;
+    tasks.filter(task => task.completed).length;
   document.getElementById("pending").textContent =
-    tasks.filter(t => !t.completed).length;
+    tasks.filter(task => !task.completed).length;
 
   const query = searchInput.value.trim().toLowerCase();
+
   const visible = tasks.filter(task => {
     const matchesFilter =
       currentFilter === "All" ||
       (currentFilter === "Completed" && task.completed) ||
       (currentFilter === "Pending" && !task.completed);
+
     return matchesFilter && task.name.toLowerCase().includes(query);
   });
 
@@ -282,10 +347,26 @@ function renderTasks() {
     checkbox.className = "task-check";
     checkbox.checked = task.completed;
     checkbox.setAttribute("aria-label", "Mark task completed");
-    checkbox.addEventListener("change", () => {
+
+    checkbox.addEventListener("change", async () => {
+      const previous = task.completed;
       task.completed = checkbox.checked;
-      saveTasks();
       renderTasks();
+      setBusy(true);
+
+      try {
+        await apiRequest("/" + task.id, {
+          method: "PUT",
+          body: JSON.stringify(toApi(task))
+        });
+        hideNotice();
+      } catch (error) {
+        task.completed = previous;
+        showNotice(error.message, "error");
+      } finally {
+        setBusy(false);
+        renderTasks();
+      }
     });
 
     const info = document.createElement("div");
@@ -297,19 +378,21 @@ function renderTasks() {
 
     const meta = document.createElement("div");
     meta.className = "task-meta";
-
-    const priorityClass = task.priority.toLowerCase();
-    meta.appendChild(makePill(task.priority + " Priority", priorityClass));
+    meta.appendChild(
+      makePill(task.priority + " Priority", task.priority.toLowerCase())
+    );
 
     if (task.dueDate) {
       const due = document.createElement("span");
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const dueDate = new Date(task.dueDate + "T00:00:00");
-      const isOverdue = !task.completed && dueDate < today;
-      due.className = "pill " + (isOverdue ? "overdue" : "due");
-      due.textContent = (isOverdue ? "Overdue · " : "Due · ") +
+      const overdue = !task.completed && dueDate < today;
+
+      due.className = "pill " + (overdue ? "overdue" : "due");
+      due.textContent = (overdue ? "Overdue · " : "Due · ") +
         dueDate.toLocaleDateString();
+
       meta.appendChild(due);
     }
 
@@ -320,10 +403,21 @@ function renderTasks() {
     deleteButton.className = "delete";
     deleteButton.textContent = "Delete";
     deleteButton.setAttribute("aria-label", "Delete " + task.name);
-    deleteButton.addEventListener("click", () => {
-      tasks = tasks.filter(t => t.id !== task.id);
-      saveTasks();
-      renderTasks();
+
+    deleteButton.addEventListener("click", async () => {
+      if (busy) return;
+      setBusy(true);
+
+      try {
+        await apiRequest("/" + task.id, { method: "DELETE" });
+        tasks = tasks.filter(item => item.id !== task.id);
+        hideNotice();
+      } catch (error) {
+        showNotice(error.message, "error");
+      } finally {
+        setBusy(false);
+        renderTasks();
+      }
     });
 
     row.append(checkbox, info, deleteButton);
@@ -331,39 +425,70 @@ function renderTasks() {
   });
 }
 
-form.addEventListener("submit", event => {
+function setBusy(value) {
+  busy = value;
+  addButton.disabled = value;
+  document.querySelectorAll(".task-check, .delete").forEach(button => {
+    button.disabled = value;
+  });
+}
+
+form.addEventListener("submit", async event => {
   event.preventDefault();
+
+  if (busy) return;
+
   const name = input.value.trim();
   if (!name) return;
 
-  tasks.unshift({
-    id: Date.now() + Math.random(),
+  const newTask = {
     name,
     priority: priorityInput.value,
     dueDate: dueInput.value,
     completed: false
-  });
+  };
 
-  saveTasks();
-  form.reset();
-  priorityInput.value = "Medium";
-  renderTasks();
-  input.focus();
+  setBusy(true);
+
+  try {
+    const saved = await apiRequest("", {
+      method: "POST",
+      body: JSON.stringify(toApi(newTask))
+    });
+
+    if (!saved || saved.id == null) {
+      throw new Error("Task was not returned by the backend.");
+    }
+
+    tasks.unshift(fromApi(saved));
+    form.reset();
+    priorityInput.value = "Medium";
+    hideNotice();
+    renderTasks();
+    input.focus();
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    setBusy(false);
+  }
 });
 
 document.querySelectorAll("[data-filter]").forEach(button => {
   button.addEventListener("click", () => {
     currentFilter = button.dataset.filter;
-    document.querySelectorAll("[data-filter]").forEach(b =>
-      b.classList.toggle("active", b === button)
-    );
+
+    document.querySelectorAll("[data-filter]").forEach(item => {
+      item.classList.toggle("active", item === button);
+    });
+
     renderTasks();
   });
 });
 
 searchInput.addEventListener("input", renderTasks);
 
-renderTasks();
+// Fetch saved tasks from the Spring Boot backend.
+loadTasks();
 </script>
 </body>
 </html>
